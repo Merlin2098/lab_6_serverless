@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(uv export:*)",
+      "Bash(uv add:*)",
+      "Bash(uv lock:*)",
+      "Bash(uv --version)",
+      "Bash(python scripts/testing/run_pytest.py:*)",
+      "Bash(python scripts/testing/run_ruff_check.py:*)",
+      "Bash(python scripts/testing/run_ruff_format.py:*)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform -chdir=infra init:*)",
+      "Bash(terraform -chdir=infra fmt:*)",
+      "Bash(terraform -chdir=infra validate:*)",
+      "Bash(terraform -chdir=infra plan:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git check-ignore:*)"
+    ],
+    "deny": [
+      "Bash(terraform apply:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(terraform -chdir=infra apply:*)",
+      "Bash(terraform -chdir=infra destroy:*)",
+      "Bash(terraform import:*)",
+      "Bash(terraform -chdir=infra import:*)"
+    ]
+  }
+}

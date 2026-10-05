@@ -1,0 +1,145 @@
+// Arquitectura del Lab Sesión 06 — Serverless, orquestación y contenedores.
+// Refleja infra/ (Terraform, 6 módulos). Render:
+//   dot -Tpng docs/architecture/architecture.dot -o docs/architecture/architecture.png
+//   dot -Tsvg docs/architecture/architecture.dot -o docs/architecture/architecture.svg
+digraph s6_lab {
+  graph [
+    rankdir=LR, compound=true, charset="UTF-8", pad=0.4, nodesep=0.5, ranksep=1.0,
+    fontname="Helvetica", fontsize=18, labelloc=t,
+    label="Lab Sesión 06 — Serverless, orquestación y contenedores\nus-east-1 · prefijo s6-lab-dev · Terraform en infra/ (6 módulos)\n "
+  ];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#555555", fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=10, color="#333333"];
+
+  user [
+    label="Alumno / instructor\nterraform -chdir=infra apply / destroy\nmake upload · make e2e · make athena-query",
+    shape=oval, fillcolor="#F5F5F5"
+  ];
+
+  // ---------------------------------------------------------------- datos de entrada
+  datasets [
+    label="Datasets (CSV)\ndata/samples/ (muestras fijas)\ndata/generated/ (make gen-orders)\nnombre con sufijo único · order_id = timestamp en ms",
+    shape=folder, fillcolor="#FFFDE7", color="#F9A825"
+  ];
+
+  // ---------------------------------------------------------------- storage
+  subgraph cluster_storage {
+    label="module.storage\nS3 s6-lab-dev-<account-id>-data\ncifrado AES256 · acceso público bloqueado · force_destroy";
+    style="rounded,filled"; fillcolor="#E8F5E9"; color="#2E7D32"; fontname="Helvetica"; fontsize=12;
+    raw       [label="raw/\n(entrada: *.csv)", shape=folder];
+    processed [label="processed/orders/\n(salida validada)", shape=folder];
+  }
+
+  // --------------------------------------------------------------- registry
+  subgraph cluster_registry {
+    label="module.registry";
+    style="rounded,filled"; fillcolor="#FFF3E0"; color="#E65100"; fontname="Helvetica"; fontsize=12;
+    ecr [
+      label="ECR\ns6-lab-dev-validator\nimagen validator:1.0.0 (linux/amd64)\ntags inmutables · force_delete\npolicy: pull para lambda.amazonaws.com",
+      shape=cylinder
+    ];
+  }
+
+  // ----------------------------------------------------------------- events
+  subgraph cluster_events {
+    label="module.events";
+    style="rounded,filled"; fillcolor="#F3E5F5"; color="#6A1B9A"; fontname="Helvetica"; fontsize=12;
+    rule [label="EventBridge rule\ns6-lab-dev-raw-csv\nsource aws.s3 · Object Created\nkey: wildcard raw/*.csv"];
+    events_role [label="IAM role events-to-sfn\nstates:StartExecution", shape=note, fillcolor="#FAFAFA"];
+  }
+
+  // ---------------------------------------------------------- orchestration
+  subgraph cluster_orch {
+    label="module.orchestration\nStep Functions Standard · s6-lab-dev-pipeline";
+    style="rounded,filled"; fillcolor="#E3F2FD"; color="#1565C0"; fontname="Helvetica"; fontsize=12;
+
+    validate [label="Validate\nTask lambda:invoke\nRetry x3 (errores de servicio Lambda)\nCatch States.ALL → $.error", fillcolor="#BBDEFB"];
+    is_valid [label="IsValid\nChoice\n$.validation.Payload.valid", shape=diamond, fillcolor="#BBDEFB"];
+    start_crawler [label="StartCrawler\nTask (SDK glue:startCrawler, sin Lambda)\nCatch CrawlerRunning → éxito", fillcolor="#BBDEFB"];
+    ok       [label="PipelineSucceeded\nSucceed", fillcolor="#C8E6C9", color="#2E7D32"];
+    invalid  [label="InvalidFile\nFail (archivo inválido)", fillcolor="#FFCDD2", color="#C62828"];
+    handle   [label="HandleError\nPass", fillcolor="#FFE0B2"];
+    failed   [label="PipelineFailed\nFail (PipelineError)", fillcolor="#FFCDD2", color="#C62828"];
+
+    sfn_role [label="IAM role sfn\nlambda:InvokeFunction (solo la validadora)\nglue:StartCrawler (solo ese Crawler)\nlogs: entrega (Resource * justificado)", shape=note, fillcolor="#FAFAFA"];
+    sfn_logs [label="CloudWatch Logs\n/aws/vendedlogs/states/\ns6-lab-dev-pipeline · 7 días", shape=note, fillcolor="#FAFAFA"];
+  }
+
+  // ---------------------------------------------------------------- compute
+  subgraph cluster_compute {
+    label="module.compute";
+    style="rounded,filled"; fillcolor="#FFFDE7"; color="#F9A825"; fontname="Helvetica"; fontsize=12;
+    fn [
+      label="Lambda validadora\ns6-lab-dev-validator\nPackageType=Image · x86_64 · 256 MB · 30 s\nenv: PROCESSED_PREFIX, REQUIRED_COLUMNS",
+      fillcolor="#FFF9C4"
+    ];
+    fn_role [
+      label="IAM role validator-exec\ns3:GetObject raw/*\ns3:PutObject processed/orders/*\n(inject_fault=true quita PutObject)",
+      shape=note, fillcolor="#FAFAFA"
+    ];
+    fn_logs [label="CloudWatch Logs\n/aws/lambda/s6-lab-dev-validator · 7 días", shape=note, fillcolor="#FAFAFA"];
+  }
+
+  // ---------------------------------------------------------------- catalog
+  subgraph cluster_catalog {
+    label="module.catalog\ncatálogo y consulta";
+    style="rounded,filled"; fillcolor="#E0F2F1"; color="#00695C"; fontname="Helvetica"; fontsize=12;
+    crawler    [label="Glue Crawler\ns6-lab-dev-orders\niniciado por StartCrawler\n(o make crawler-start)"];
+    classifier [label="Classifier CSV\nencabezado PRESENT", shape=note, fillcolor="#FAFAFA"];
+    crawler_role [label="IAM role crawler\nAWSGlueServiceRole\n+ lectura processed/orders/", shape=note, fillcolor="#FAFAFA"];
+    db         [label="Data Catalog\nbase s6_lab_db\ntabla orders", shape=cylinder];
+    workgroup  [label="Athena workgroup\ns6-lab-dev-wg\nforce_destroy"];
+    results    [label="S3 resultados Athena\ns6-lab-dev-<account-id>-athena-results\ncifrado · force_destroy", shape=folder];
+    glue_logs  [label="logs del Crawler:\n/aws-glue/crawlers\n(compartido, no gestionado\npor este stack · ADR 0001)", shape=note, style="rounded,dashed", fillcolor="#FAFAFA"];
+  }
+
+  // ---------------------------------------------------------------- flujo
+  user -> datasets [label="0  make gen-orders\n(scripts/generate_orders.py)"];
+  datasets -> raw [label="1  s3 cp *.csv\n(make upload / upload-generated / smoke)", penwidth=1.6];
+  raw  -> rule [label="2  Object Created\n(notificación S3 → EventBridge)", penwidth=1.6];
+  rule -> validate [label="3  states:StartExecution\n(evento completo)", lhead=cluster_orch, penwidth=1.6];
+  validate -> fn [label="4  lambda:invoke", penwidth=1.6];
+  ecr -> fn [label="imagen\n(pull al crear/actualizar)", style=dashed];
+  fn -> raw [label="5  GetObject", constraint=false, penwidth=1.6];
+  fn -> processed [label="6  PutObject\n(misma clave: idempotente)", penwidth=1.6];
+
+  validate -> is_valid;
+  is_valid -> start_crawler [label="valid = true"];
+  start_crawler -> ok;
+  start_crawler -> crawler [label="7  glue:StartCrawler", penwidth=1.6, lhead=cluster_catalog];
+  start_crawler -> handle [label="Catch\n(otro error)", color="#C62828", fontcolor="#C62828"];
+  is_valid -> invalid [label="default"];
+  validate -> handle [label="Catch\n(error inesperado)", color="#C62828", fontcolor="#C62828"];
+  handle -> failed;
+
+  processed -> crawler [label="8  escaneo", penwidth=1.6];
+  classifier -> crawler [style=dashed, arrowhead=none, constraint=false];
+  crawler -> db [label="9  crea la tabla", penwidth=1.6];
+  user -> workgroup [label="10  consulta\nmake athena-query", penwidth=1.6];
+  workgroup -> db [label="SELECT ... FROM s6_lab_db.orders"];
+  workgroup -> results [label="resultados"];
+
+  // ------------------------------------------------- permisos y logs (tenues)
+  events_role -> rule [style=dashed, arrowhead=none, color="#9E9E9E", constraint=false];
+  sfn_role -> validate [style=dashed, arrowhead=none, color="#9E9E9E", constraint=false];
+  fn_role -> fn [style=dashed, arrowhead=none, color="#9E9E9E", constraint=false];
+  crawler_role -> crawler [style=dashed, arrowhead=none, color="#9E9E9E", constraint=false];
+  validate -> sfn_logs [style=dashed, color="#9E9E9E", constraint=false, label="logs"];
+  fn -> fn_logs [style=dashed, color="#9E9E9E", constraint=false, label="logs"];
+  crawler -> glue_logs [style=dashed, color="#9E9E9E", constraint=false];
+
+  // ---------------------------------------------------------------- leyenda
+  legend [
+    shape=plaintext, style="", fontsize=10,
+    label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#BDBDBD">
+      <TR><TD ALIGN="LEFT"><B>Leyenda</B></TD></TR>
+      <TR><TD ALIGN="LEFT">Flecha gruesa numerada: flujo principal del dato</TD></TR>
+      <TR><TD ALIGN="LEFT">Flecha roja: ruta de error inesperado (Catch)</TD></TR>
+      <TR><TD ALIGN="LEFT">Terraform se ejecuta directo; el Makefile solo cubre Docker/ECR, AWS CLI y scripts</TD></TR>
+      <TR><TD ALIGN="LEFT">Línea punteada gris: permisos IAM / logs / imagen</TD></TR>
+      <TR><TD ALIGN="LEFT">Cada cuadro "module.*" es un módulo de infra/modules/</TD></TR>
+      <TR><TD ALIGN="LEFT">Tags en todo recurso: Project=s6-lab · Course=aws-data-engineer · Session=06<BR ALIGN="LEFT"/>Lab=serverless-orchestration-containers · Environment · Owner · ManagedBy=Terraform<BR ALIGN="LEFT"/>CostCenter=s6-lab-serverless · Component=&lt;módulo&gt;</TD></TR>
+    </TABLE>>
+  ];
+  user -> legend [style=invis];
+}

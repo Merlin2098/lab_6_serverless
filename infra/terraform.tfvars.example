@@ -1,0 +1,12 @@
+project_name = "s6-lab"
+environment  = "dev"
+aws_region   = "us-east-1"
+owner        = "datahackers-bootcamp-da"
+cost_center  = "s6-lab-serverless"
+
+# Default image tag is 1.0.0; use the same value in `make image-publish TAG=...`.
+# image_tag = "1.0.0"
+
+# Extra tags (the lab already sets Project, Course, Session, Lab, Environment,
+# Owner, ManagedBy, CostCenter and, per module, Component).
+tags = {}

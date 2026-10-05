@@ -1,0 +1,85 @@
+{
+  "Comment": "Validates a CSV uploaded to raw/, writes it to processed/orders/ and starts the Glue crawler",
+  "StartAt": "Validate",
+  "States": {
+    "Validate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${lambda_arn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.validation",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "IsValid"
+    },
+    "IsValid": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validation.Payload.valid",
+          "BooleanEquals": true,
+          "Next": "StartCrawler"
+        }
+      ],
+      "Default": "InvalidFile"
+    },
+    "StartCrawler": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name": "${crawler_name}"
+      },
+      "ResultPath": "$.crawler",
+      "Catch": [
+        {
+          "ErrorEquals": ["Glue.CrawlerRunningException"],
+          "ResultPath": "$.crawler",
+          "Next": "PipelineSucceeded"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "PipelineSucceeded"
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "InvalidFile": {
+      "Type": "Fail",
+      "Error": "InvalidFile",
+      "Cause": "El archivo no cumple las reglas de validación"
+    },
+    "HandleError": {
+      "Type": "Pass",
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineError",
+      "Cause": "Fallo inesperado; ver $.error"
+    }
+  }
+}

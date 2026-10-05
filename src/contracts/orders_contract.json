@@ -1,0 +1,30 @@
+{
+  "dataset": "s6_lab_db.orders",
+  "owner": "data-engineering",
+  "description": "CSV files uploaded to raw/ and, once valid, copied to processed/orders/ under the same name.",
+  "primary_key": [
+    "order_id"
+  ],
+  "columns": [
+    {
+      "name": "order_id",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "customer_id",
+      "type": "string",
+      "nullable": false
+    },
+    {
+      "name": "amount",
+      "type": "decimal",
+      "nullable": false
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "nullable": false
+    }
+  ]
+}

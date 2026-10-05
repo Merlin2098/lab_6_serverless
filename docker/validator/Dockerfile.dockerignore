@@ -1,0 +1,4 @@
+# Context is the repo root: exclude everything except the Lambda handler
+# (keeps .venv, .git, infra/ and .env* files out of the build context).
+*
+!src/lambdas/validator/app.py

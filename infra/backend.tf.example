@@ -1,0 +1,32 @@
+# Remote backend example — S3 with native locking (no DynamoDB).
+#
+# Rename this file to `backend.tf` to activate. `backend.tf` is gitignored
+# (host-specific) so each host repo wires its own state location without
+# committing it.
+#
+# Requirements:
+#   - Terraform >= 1.10
+#   - AWS provider >= 5.81
+#   - The state bucket must already exist with versioning enabled and
+#     `force_destroy = false`. Encryption at rest (AES256 or KMS) recommended.
+#   - The IAM principal running Terraform needs s3:GetObject, s3:PutObject,
+#     s3:DeleteObject, s3:ListBucket on the state bucket and the lock object.
+#
+# Why no DynamoDB:
+#   Since Nov 2024, the S3 backend supports native locking via `use_lockfile`.
+#   It writes a `<key>.tflock` object next to the state, removing the need for
+#   a separate DynamoDB lock table. Simpler IAM, lower cost, easier teardown.
+
+terraform {
+  backend "s3" {
+    bucket       = "REPLACE-WITH-STATE-BUCKET-NAME"
+    key          = "terraform/REPLACE-WITH-PROJECT/REPLACE-WITH-ENV/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+
+# Optional convention for multi-environment hosts:
+#   key = "terraform/<project>/<env>/terraform.tfstate"
+# Keeps state objects scoped per environment under a single bucket.
