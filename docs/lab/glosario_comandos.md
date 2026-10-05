@@ -101,6 +101,8 @@ Se pasan al final del comando: `make upload FILE=data/samples/orders_2026_10_05.
 
 **`linux/amd64` y `--provenance=false`.** Opciones del `docker build`: la primera fija la arquitectura de la Lambda (`x86_64`) y la segunda evita metadatos extra que Lambda rechaza (`InvalidImage`).
 
+**Lambda validadora.** La función del pipeline: lee cada CSV de `raw/`, lo valida (columnas, extensión, `amount` numérico…) y, si es válido, escribe una copia limpia en `processed/orders/`. Qué reglas aplica y qué devuelve: [README](../../README.md#qué-hace-la-lambda-validadora).
+
 **Marcador `cloud`.** Etiqueta de pytest para los tests que necesitan AWS. `make test` los excluye.
 
 **Output (Terraform).** Valor que Terraform publica tras desplegar (bucket, repositorio, Crawler…). El Makefile los lee, sin modificarlos, para no pedirte esos nombres.

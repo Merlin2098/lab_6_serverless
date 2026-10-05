@@ -13,6 +13,49 @@ S3 raw/*.csv -> EventBridge -> Step Functions -> Lambda (imagen en ECR) -> S3 pr
 
 **Duración objetivo:** 45 minutos. **Región:** `us-east-1`.
 
+## Qué hace la Lambda validadora
+
+Es la única pieza de código propio del pipeline: una función Python (`src/lambdas/validator/app.py`) empaquetada como imagen de contenedor (x86_64, 256 MB, 30 s). **No la dispara S3 ni EventBridge directamente: la invoca Step Functions**, una vez por cada CSV nuevo en `raw/`. Su trabajo es decidir si el archivo es aceptable y, si lo es, dejar una copia limpia en `processed/orders/`.
+
+**Paso a paso**
+
+1. **Recibe el evento** de EventBridge (que Step Functions le pasa completo) y saca de él el bucket y la clave del archivo.
+2. **Lee el objeto** de `raw/` en S3 y lo decodifica como UTF-8, descartando el BOM si lo trae (el BOM es un carácter invisible que algunos programas, como Excel, añaden al inicio y que ensucia el encabezado).
+3. **Valida el contenido** con las reglas de abajo. La primera que falle decide el motivo del rechazo.
+4. **Si es válido, escribe el archivo** en `processed/orders/` **con el mismo nombre**, ya normalizado (UTF-8, sin BOM). No transforma las filas: las copia tal cual.
+5. **Devuelve el resultado** a Step Functions, que decide el siguiente paso.
+
+**Reglas de validación** (en este orden)
+
+| Regla | Motivo si falla (`reason`) |
+|---|---|
+| El contenido es UTF-8 válido | `invalid_encoding` |
+| El nombre termina en `.csv` | `invalid_extension` |
+| El archivo no está vacío | `empty_file` |
+| Tiene las columnas `order_id`, `customer_id`, `amount` y `status` | `missing_columns: <las que faltan>` |
+| Tiene al menos una fila de datos | `no_data_rows` |
+| Todos los `amount` son números (no `abc`, `NaN` ni `1_000`) | `invalid_amount: row N` |
+
+Solo comprueba la **forma** del archivo. No valida los valores de `order_id`, `customer_id` ni `status`, ni busca duplicados.
+
+**Qué devuelve y qué pasa después**
+
+| Resultado de la Lambda | Estado en Step Functions |
+|---|---|
+| `{"valid": true, "records": 10, "output": "processed/orders/orders_….csv"}` | `IsValid` → `StartCrawler` → `PipelineSucceeded` |
+| `{"valid": false, "reason": "invalid_amount: row 1"}` | `IsValid` → `InvalidFile` (ejecución `FAILED`, sin archivo de salida) |
+| Error inesperado (por ejemplo `AccessDenied` al escribir en S3) | Se propaga **a propósito**: Step Functions reintenta los errores de servicio de Lambda y, si persiste, lo captura en `$.error` → `HandleError` → `PipelineFailed` |
+
+Un archivo inválido no es un error de la Lambda: ella responde con normalidad (`valid: false`) y es Step Functions quien lo marca como fallido. Un error técnico, en cambio, sí rompe la ejecución. Esa diferencia es la que se explora en el ejercicio de Troubleshoot.
+
+**Propiedades que conviene conocer**
+
+- **Idempotente:** la salida tiene el mismo nombre que la entrada, así que reprocesar un archivo sobrescribe su copia en `processed/` en lugar de duplicar filas.
+- **Permisos mínimos:** su rol solo puede leer `raw/*` y escribir `processed/orders/*`. Con `inject_fault=true` Terraform le quita el permiso de escritura para provocar el fallo del ejercicio.
+- **Configurable:** las variables de entorno `PROCESSED_PREFIX` (por defecto `processed/orders/`) y `REQUIRED_COLUMNS` cambian la carpeta de salida y las columnas exigidas, sin tocar el código.
+- **Límite conocido:** lee el archivo completo en memoria; sirve para CSV pequeños (hasta decenas de MB). Para archivos de varios GB habría que procesar en streaming o usar Glue.
+- **Fácil de probar:** la validación es una función pura (`validate_csv`), sin acceso a AWS, con tests locales en `tests/lambdas/test_validator.py` (`make test`).
+
 ## Qué vas a aprender
 
 - Cómo un evento de S3 inicia un workflow sin código de pegamento (EventBridge → Step Functions).
@@ -105,6 +148,7 @@ docs/                     # ver abajo
 | Quiero...                                 | Voy a                                                                   |
 | ----------------------------------------- | ----------------------------------------------------------------------- |
 | Ver el mapa de servicios                  | [docs/architecture/architecture.png](docs/architecture/architecture.png) |
+| Entender qué hace la Lambda               | [Qué hace la Lambda validadora](#qué-hace-la-lambda-validadora) y su código en [app.py](src/lambdas/validator/app.py) |
 | Desplegar y destruir el stack             | [docs/deploy/guia_deploy.md](docs/deploy/guia_deploy.md)                 |
 | Entender la imagen Docker, ECR y los tags | [docs/deploy/guia_docker.md](docs/deploy/guia_docker.md)                 |
 | Recorrer el pipeline por la consola       | [docs/lab/demo_consola_aws.md](docs/lab/demo_consola_aws.md)             |
